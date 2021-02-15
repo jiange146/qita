@@ -33,6 +33,6 @@ jobs:
                 sudo apt-get update
                 sudo apt-get -y install curl jq
 
-            - name: Request API
+            - name: 机场自动签到
               run: |
                 bash qiandao.sh
