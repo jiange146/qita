@@ -1,4 +1,4 @@
-name: 签到
+name: 网易云
 
 on:
   push:
