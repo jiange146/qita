@@ -1,249 +1,160 @@
-#!/usr/bin/env python
-# -*- encoding: utf-8 -*-
-'''
-@FILE    :   action.py
-@DSEC    :   网易云音乐签到刷歌脚本
-@AUTHOR  :   Secriy
-@DATE    :   2020/08/25
-@VERSION :   2.1
-'''
-
-import os
-import sys
-import requests
-import base64
-import json
-import hashlib
-import binascii
-import codecs
-import argparse
-import random
+import requests, base64, json, hashlib
 from Crypto.Cipher import AES
 
 
-class Encrypt:
-    def __init__(self):
-        self.modulus = '00e0b509f6259df8642dbc35662901477df22677ec152b5ff68ace615bb7b725152b3ab17a876aea8a5aa76d2e417629ec4ee341f56135fccf695280104e0312ecbda92557c93870114af6c9d05c4f7f0c3685b7a46bee255932575cce10b424d813cfe4875d3e82047b97ddef52741d546b8e289dc6935b3ece0462db0a22b8e7'
-        self.nonce = '0CoJUm6Qyw8W8jud'
-        self.pubKey = '010001'
-
-    # Random String Generator
-    def createSecretKey(self, size):
-        return str(binascii.hexlify(os.urandom(size))[:16], encoding='utf-8')
-
-    # AES Encrypt
-    def aesEncrypt(self, text, secKey):
-        pad = 16 - len(text) % 16
-        text = text + pad * chr(pad)
-        encryptor = AES.new(secKey.encode('utf8'), 2, b'0102030405060708')
-        ciphertext = encryptor.encrypt(text.encode('utf8'))
-        ciphertext = str(base64.b64encode(ciphertext), encoding='utf-8')
-        return ciphertext
-
-    # RSA Encrypt
-    def rsaEncrypt(self, text, pubKey, modulus):
-        text = text[::-1]
-        rs = int(text.encode('utf-8').hex(), 16)**int(pubKey, 16) % int(
-            modulus, 16)
-        return format(rs, 'x').zfill(256)
-
-    def encrypt(self, text):
-        secKey = self.createSecretKey(16)
-        encText = self.aesEncrypt(self.aesEncrypt(text, self.nonce), secKey)
-        encSecKey = self.rsaEncrypt(secKey, self.pubKey, self.modulus)
-        return {'params': encText, 'encSecKey': encSecKey}
+def push_server_chan(logs):
+    if sckey is None or sckey == "":
+        print("跳过推送")
+        return
+    params = {
+        'text': "网易云音乐自动脚本",
+        'desp': logs
+    }
+    serverURL = "https://sc.ftqq.com/" + sckey + ".send"
+    response = requests.session().post(serverURL, data=params)
+    if response.status_code == 200:
+        print("推送成功")
 
 
-class CloudMusic:
-    def __init__(self):
-        self.session = requests.Session()
-        self.enc = Encrypt()
-        self.headers = {
-            "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/84.0.4147.89 Safari/537.36",
-            "Referer": "http://music.163.com/",
-            "Accept-Encoding": "gzip, deflate",
-        }
-
-    def login(self, phone, password):
-        loginUrl = "https://music.163.com/weapi/login/cellphone"
-        self.loginData = self.enc.encrypt(
-            json.dumps({
-                'phone': phone,
-                'countrycode': '86',
-                'password': password,
-                'rememberLogin': 'true'
-            }))
-        headers = {
-            "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/84.0.4147.89 Safari/537.36",
-            "Referer":
-            "http://music.163.com/",
-            "Accept-Encoding":
-            "gzip, deflate",
-            "Cookie":
-            "os=pc; osver=Microsoft-Windows-10-Professional-build-10586-64bit; appver=2.0.3.131777; channel=netease; __remember_me=true;"
-        }
-        res = self.session.post(url=loginUrl,
-                                data=self.loginData,
-                                headers=headers)
-        ret = json.loads(res.text)
-        if ret['code'] == 200:
-            self.cookie = res.cookies
-            self.csrf = requests.utils.dict_from_cookiejar(
-                self.cookie)['__csrf']
-            self.nickname = ret["profile"]["nickname"]
-            self.beforeCount = self.getLevel()["nowPlayCount"]
-
-            retext = "\"{nickname}\" 登录成功，当前等级：{level}\n\n".format(
-                nickname=self.nickname, level=self.getLevel()
-                ["level"]) + "距离升级还需听{beforeCount}首歌".format(
-                    beforeCount=self.getLevel()["nextPlayCount"] -
-                    self.getLevel()["nowPlayCount"])
-            return retext
-        else:
-            return ("登录失败 " + str(ret['code']) + "：" + ret['message'])
-            exit()
-
-    def getLevel(self):
-        url = "https://music.163.com/weapi/user/level?csrf_token=" + self.csrf
-        res = self.session.post(url=url,
-                                data=self.loginData,
-                                headers=self.headers)
-        ret = json.loads(res.text)
-        return ret["data"]
-
-    # def refresh(self):
-    #     url = "https://music.163.com/weapi/login/token/refresh?csrf_token=" + self.csrf
-    #     res = self.session.post(url=url,
-    #                             data=self.loginData,
-    #                             headers=self.headers)
-    #     ret = json.loads(res.text)
-    #     print(ret)
-    #     return ret["code"]
-
-    def sign(self):
-        signUrl = "https://music.163.com/weapi/point/dailyTask"
-        res = self.session.post(url=signUrl,
-                                data=self.enc.encrypt('{"type":0}'),
-                                headers=self.headers)
-        ret = json.loads(res.text)
-        if ret['code'] == 200:
-            return ("签到成功，经验+" + str(ret['point']))
-        elif ret['code'] == -2:
-            return ("今天已经签到过了")
-        else:
-            return ("签到失败 " + str(ret['code']) + "：" + ret['message'])
-
-    def task(self, custom):
-        url = "https://music.163.com/weapi/v6/playlist/detail?csrf_token=" + self.csrf
-        recommendUrl = "https://music.163.com/weapi/v1/discovery/recommend/resource"
-        if not custom:
-            res = self.session.post(url=recommendUrl,
-                                    data=self.enc.encrypt('{"csrf_token":"' +
-                                                          self.csrf + '"}'),
-                                    headers=self.headers)
-            ret = json.loads(res.text)
-            if ret['code'] != 200:
-                print("获取推荐歌曲失败 " + str(ret['code']) + "：" + ret['message'])
-            else:
-                lists = ret['recommend']
-                musicLists = [(d['id']) for d in lists]
-        else:
-            musicLists = custom
-        musicId = []
-        for m in musicLists:
-            res = self.session.post(url=url,
-                                    data=self.enc.encrypt(
-                                        json.dumps({
-                                            'id': m,
-                                            'n': 1000,
-                                            'csrf_token': self.csrf
-                                        })),
-                                    headers=self.headers)
-            ret = json.loads(res.text)
-            for i in ret['playlist']['trackIds']:
-                musicId.append(i['id'])
-        # print("歌单大小：{musicCount}首\n".format(musicCount=len(musicId)))
-        postData = json.dumps({
-            'logs':
-            json.dumps(
-                list(
-                    map(
-                        lambda x: {
-                            'action': 'play',
-                            'json': {
-                                'download': 0,
-                                'end': 'playend',
-                                'id': x,
-                                'sourceId': '',
-                                'time': 240,
-                                'type': 'song',
-                                'wifi': 0
-                            }
-                        },
-                        random.sample(
-                            musicId,
-                            420 if len(musicId) > 420 else len(musicId)))))
-        })
-        res = self.session.post(
-            url="http://music.163.com/weapi/feedback/weblog",
-            data=self.enc.encrypt(postData))
-        ret = json.loads(res.text)
-        if ret['code'] == 200:
-            return ("刷听歌量成功")
-        else:
-            return ("刷听歌量失败 " + str(ret['code']) + "：" + ret['message'])
-            exit(ret['code'])
-
-    # Server Chan Turbo
-    def server_chan_turbo(self, sendkey, text):
-        url = 'https://sctapi.ftqq.com/%s.send' % sendkey
-        headers = {"Content-type": "application/x-www-form-urlencoded"}
-        content = {"title": "网易云打卡脚本", "desp": text}
-        ret = requests.post(url, headers=headers, data=content)
-        print(ret.text)
+def encrypt(key, text):
+    cryptor = AES.new(key.encode('utf8'), AES.MODE_CBC, b'0102030405060708')
+    length = 16
+    count = len(text.encode('utf-8'))
+    if (count % length != 0):
+        add = length - (count % length)
+    else:
+        add = 16
+    pad = chr(add)
+    text1 = text + (pad * add)
+    ciphertext = cryptor.encrypt(text1.encode('utf8'))
+    cryptedStr = str(base64.b64encode(ciphertext), encoding='utf-8')
+    return cryptedStr
 
 
-def getArgs():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("phone", help="your Phone Number")
-    parser.add_argument("password", help="MD5 value of the password")
-    parser.add_argument("-s",
-                        dest="SCKEY",
-                        nargs='*',
-                        help="SCKEY of the Server Chan")
-    parser.add_argument("-l", dest="PLAYLIST", nargs='*', help="your playlist")
-    args = parser.parse_args()
+def md5(str):
+    hl = hashlib.md5()
+    hl.update(str.encode(encoding='utf-8'))
+    return hl.hexdigest()
 
-    return {
-        'phone': args.phone,
-        'password': args.password,
-        'sckey': args.SCKEY,
-        'playlist': args.PLAYLIST
+
+def protect(text):
+    return {"params": encrypt('TA3YiYCfY2dDJQgg', encrypt('0CoJUm6Qyw8W8jud', text)),
+            "encSecKey": "84ca47bca10bad09a6b04c5c927ef077d9b9f1e37098aa3eac6ea70eb59df0aa28b691b7e75e4f1f9831754919ea784c8f74fbfadf2898b0be17849fd656060162857830e241aba44991601f137624094c114ea8d17bce815b0cd4e5b8e2fbaba978c6d1d14dc3d1faf852bdd28818031ccdaaa13a6018e1024e2aae98844210"}
+
+
+def do_checkin(user, pwd, logs):
+    s = requests.Session()
+    header = {}
+    url = "https://music.163.com/weapi/login/cellphone"
+    url2 = "https://music.163.com/weapi/point/dailyTask"
+    url3 = "https://music.163.com/weapi/v1/discovery/recommend/resource"
+    logindata = {
+        "phone": user,
+        "countrycode": "86",
+        "password": md5(pwd),
+        "rememberLogin": "true",
+    }
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/84.0.4147.89 Safari/537.36',
+        "Referer": "http://music.163.com/",
+        "Accept-Encoding": "gzip, deflate",
+    }
+    headers2 = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/84.0.4147.89 Safari/537.36',
+        "Referer": "http://music.163.com/",
+        "Accept-Encoding": "gzip, deflate",
+        "Cookie": "os=pc; osver=Microsoft-Windows-10-Professional-build-10586-64bit; appver=2.0.3.131777; channel=netease; __remember_me=true;"
     }
 
+    res = s.post(url=url, data=protect(json.dumps(logindata)), headers=headers2)
+    tempcookie = res.cookies
+    object = json.loads(res.text)
+    if object['code'] == 200:
+        print("登录成功！")
+        logs += "账号" + logindata["phone"] + "登录成功！\n\n"
+    else:
+        print("登录失败！请检查密码是否正确！" + str(object['code']))
+        logs += "账号" + logindata["phone"] + "登录失败！请检查密码是否正确！\n\n"
+        return logs + str(object['code'])
 
-if __name__ == "__main__":
-    # Get Args
-    info = getArgs()
-    # Start
-    app = CloudMusic()
-    print(30 * "=")
-    # Login
-    res_login = app.login(info['phone'], info['password'])
-    # Sign In
-    res_sign = app.sign()
-    # Music Task
-    res_task = app.task(info['playlist'])
-    # Print Response
-    res = res_login + "\n\n" + res_sign + "\n\n" + res_task
-    print(res)
-    print(30 * "=")
-    try:
-        if info['sckey']:
-            # 调用Server酱
-            app.server_chan_turbo(info['sckey'][0], res)
-    except Exception as err:
-        print("Server酱调用失败：" + err)
-    print(30 * "=")
+    res = s.post(url=url2, data=protect('{"type":0}'), headers=headers)
+    object = json.loads(res.text)
+    if object['code'] != 200 and object['code'] != -2:
+        print("签到时发生错误：" + object['msg'])
+    else:
+        if object['code'] == 200:
+            print("签到成功，经验+" + str(object['point']))
+            logs += "签到成功，经验+" + str(object['point']) + "\n\n"
+        else:
+            print("重复签到")
+            logs += "重复签到\n\n"
+
+    res = s.post(url=url3,
+                 data=protect('{"csrf_token":"' + requests.utils.dict_from_cookiejar(tempcookie)['__csrf'] + '"}'),
+                 headers=headers)
+    object = json.loads(res.text, strict=False)
+    for x in object['recommend']:
+        url = 'https://music.163.com/weapi/v3/playlist/detail?csrf_token=' + \
+              requests.utils.dict_from_cookiejar(tempcookie)[
+                  '__csrf']
+        data = {
+            'id': x['id'],
+            'n': 1000,
+            'csrf_token': requests.utils.dict_from_cookiejar(tempcookie)['__csrf'],
+        }
+        res = s.post(url, protect(json.dumps(data)), headers=headers)
+        object = json.loads(res.text, strict=False)
+        buffer = []
+        count = 0
+        for j in object['playlist']['trackIds']:
+            data2 = {}
+            data2["action"] = "play"
+            data2["json"] = {}
+            data2["json"]["download"] = 0
+            data2["json"]["end"] = "playend"
+            data2["json"]["id"] = j["id"]
+            data2["json"]["sourceId"] = ""
+            data2["json"]["time"] = "240"
+            data2["json"]["type"] = "song"
+            data2["json"]["wifi"] = 0
+            buffer.append(data2)
+            count += 1
+            if count >= 310:
+                break
+        if count >= 310:
+            break
+    url = "http://music.163.com/weapi/feedback/weblog"
+    postdata = {
+        "logs": json.dumps(buffer)
+    }
+    res = s.post(url, protect(json.dumps(postdata)))
+    object = json.loads(res.text, strict=False)
+    if object['code'] == 200:
+        print("刷单成功！共" + str(count) + "首")
+        logs += "刷单成功！共" + str(count) + "首\n\n"
+        return logs
+    else:
+        print("发生错误：" + str(object['code']) + object['message'])
+        logs += "发生错误：" + str(object['code']) + object['message'] + "\n\n"
+        return logs + str(object['code'])
+
+
+if __name__ == '__main__':
+    logs = ""
+    user_list = input().split("#")
+    pwd_list = input().split("#")
+    sckey = input()
+    if len(user_list) != len(pwd_list):
+        print("账号和密码个数不对应")
+        logs += "账号和密码个数不对应\n\n"
+    else:
+        print("共有" + str(len(user_list)) + "个账号，即将开始签到")
+        logs += "共有" + str(len(user_list)) + "个账号，即将开始签到\n\n"
+        for user, pwd in zip(user_list, pwd_list):
+            try:
+                logs = do_checkin(user, pwd, logs)
+            except BaseException as e:
+                logs += "程序出现异常"+e
+        logs += "执行完成"
+    push_server_chan(logs)
+    exit()

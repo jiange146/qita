@@ -1,35 +1,35 @@
-# This workflow will install Python dependencies, run tests and lint with a single version of Python
-# For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
-
-name: 网易云飞升
+name: 签到
 
 on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
   schedule:
-    - cron: "0 16 * * *"
-  workflow_dispatch:
+    - cron: 0 22,14 * * *
+  watch:
+    types: started
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    if: github.event.repository.owner.id == github.event.sender.id
 
     steps:
       - uses: actions/checkout@v2
-      - name: Set up Python 3.8
+      - name: 初始化Python
         uses: actions/setup-python@v2
         with:
-          python-version: 3.8
-      - name: Install dependencies
+          python-version: 3.7
+      - name: 网易云
         run: |
-          python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-      - name: Run Script
-        env:
-          PHONE: ${{ secrets.PHONE }}
-          PASSWORD: ${{ secrets.PASSWORD }}
-          NOMD5_PASSWORD: ${{ secrets.NOMD5_PASSWORD }}
-          PLAYLIST: ${{ secrets.PLAYLIST }}
-          SCKEY: ${{ secrets.SCKEY }}
-        run: |
-          if [ ${NOMD5_PASSWORD} ];then PASSWORD=$(echo -n "${NOMD5_PASSWORD}"|md5sum|cut -d " " -f1); fi
-          if [ ${PLAYLIST} ];then PLAYLIST_CMD="-l $PLAYLIST"; fi
-          python3 网易云.py ${PHONE} ${PASSWORD} -s ${SCKEY} ${PLAYLIST_CMD}
+          pip install -r requirements.txt
+
+          user='${{ secrets.USER }}'
+          pwd='${{ secrets.PWD }}'
+          sckey='${{ secrets.SCKEY }}'
+          python3 网易云.py <<EOF
+          ${user}
+          ${pwd}
+          ${sckey}
+          EOF
